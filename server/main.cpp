@@ -9,7 +9,6 @@
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <string>
-#include <history/history.hpp>
 #include <unistd.h>
 
 using namespace std;
@@ -33,6 +32,9 @@ int main() {
         close(server);
         return 1;
     }
+
+    int listen_res = listen(server, 5);
+
 
     close(server);
     return 0;

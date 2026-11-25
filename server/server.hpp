@@ -1,21 +1,24 @@
 #pragma once
+#include "socket.hpp"
+#include <string>
+#define PORT 8080
 
 class Server {
     private:
-        int server_fd;
-        int client_fd;
+        Socket listen_socket;
+        Socket client_socket;
+        int port = PORT;
     public:
         Server();
         explicit Server(int port);
 
-        int getServerFd();
-        void setServerFd();
+        void setPort(int newPort);
+        void init();
+        bool run();
+        bool acceptClient();
 
-        int getClientFd();
-        void setClientFd();
-
-        void listenMessage();
-        void sendMessage();
+        bool send(const std::string message);
+        std::string receive();
 
         ~Server();
 };

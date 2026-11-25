@@ -5,7 +5,11 @@
 
 using std::cout, std::endl;
 
-Socket::Socket() : fd(-1) {}
+Socket::Socket() {
+    this->fd = socket(AF_INET, SOCK_STREAM, 0);
+    //int opt=1;
+    //setsockopt(this->fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+}
 
 int Socket::getFd() const {
     return this->fd;
@@ -28,10 +32,10 @@ Socket& Socket::operator=(Socket&& newOne) noexcept {
 
 
 bool Socket::isOpen() const {
-    if (this->fd != -1) return true;
+    if (this->fd >= 0) return true;
     return false;
 }
-
+/*
 bool Socket::TCP_Init() {
     if (this->isOpen()) {
         cout << "[SCK] Socket is already opened" << endl;
@@ -40,7 +44,7 @@ bool Socket::TCP_Init() {
     this->fd = socket(AF_INET, SOCK_STREAM, 0);
     return this->isOpen();
 }
-
+*/
 void Socket::close() {
     if (this->isOpen()) {
         ::close(this->fd);
