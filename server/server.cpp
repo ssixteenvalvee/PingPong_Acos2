@@ -29,33 +29,33 @@ void Server::setPort(int newPort) {
     this->port = newPort;
 }
 
-void Server::init() {
+bool Server::init() {
     int bind_res = -1;
     sockaddr_in address;
     address.sin_family = AF_INET;
     address.sin_port = htons(this->port);
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (this->listen_socket.isOpen()) {
-        int bind_res = bind(this->listen_socket.getFd(), reinterpret_cast<const sockaddr*>(&address), sizeof(address));
+        bind_res = bind(this->listen_socket.getFd(), reinterpret_cast<const sockaddr*>(&address), sizeof(address));
     } else {
         std::cerr << "Socket is not opened" << std::endl;
-        return;
+        return 0;
     }
     if (bind_res < 0) {
         std::cerr << "[SERV] Bind error" << std::endl;
-        return;
+        return 0;
     }
     if (listen(this->listen_socket.getFd(), 1) < 0) {
         std::cerr << "[SERV] listen error" << std::endl;
-        return;
+        return 0;
     }
-    return;
+    return 1;
 }
 
 bool Server::run() {
-    if (!this->listen_socket.TCP_Init()) {
+    if (!this->init()) {
         std::cerr << "[SERV] Can not Init listening socket" << std::endl;
-        return -1;
+        return 0;
     }
     int option = 1;
     setsockopt(this->listen_socket.getFd(), SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option)); // re-use option. Otherwise the same socket will be closed for 2 minutes.

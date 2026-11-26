@@ -16,7 +16,7 @@ class Server {
         explicit Server(int port);
 
         void setPort(int newPort);
-        void init();
+        bool init();
         bool run();
         bool acceptClient();
 
