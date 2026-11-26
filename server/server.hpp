@@ -9,6 +9,9 @@ class Server {
         Socket client_socket;
         int port = PORT;
     public:
+        std::string client_ip; // for logging
+        int client_port;
+
         Server();
         explicit Server(int port);
 
@@ -18,7 +21,7 @@ class Server {
         bool acceptClient();
 
         bool send(const std::string message);
-        std::string receive();
+        bool receive(std::string& message, const std::string& clientIP, std::string& pending);
 
         ~Server();
 };
