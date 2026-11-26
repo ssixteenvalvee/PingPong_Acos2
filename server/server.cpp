@@ -7,6 +7,11 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <string>
+#include <string.h>
+#include <chrono>
+
+#define BUFFER_SIZE 256
+#define SOC_SAVE_OPT 0
 
 using std::string;
 
@@ -34,14 +39,15 @@ void Server::init() {
         int bind_res = bind(this->listen_socket.getFd(), reinterpret_cast<const sockaddr*>(&address), sizeof(address));
     } else {
         std::cerr << "Socket is not opened" << std::endl;
-        exit(-1);
+        return;
     }
     if (bind_res < 0) {
         std::cerr << "[SERV] Bind error" << std::endl;
-        exit(-1);
+        return;
     }
     if (listen(this->listen_socket.getFd(), 1) < 0) {
         std::cerr << "[SERV] listen error" << std::endl;
+        return;
     }
     return;
 }
@@ -55,8 +61,18 @@ bool Server::run() {
     setsockopt(this->listen_socket.getFd(), SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option)); // re-use option. Otherwise the same socket will be closed for 2 minutes.
     bool accepted = this->acceptClient();
     if (accepted != true) {
-        std::cerr << "[SERV] No client accepted" << std::endl;
+        std::cerr << "[SERV] Client connection failure" << std::endl;
         return 0;
+    }
+    string message;
+    string pending;
+    bool rec_Status = receive(message, this->client_ip, pending);
+    if (!message.empty()) {
+        // add history/log saving here
+        auto now = std::chrono::system_clock::now;
+        std::cout << "[" << now << "] MSG: " << message << std::endl; 
+    } else {
+        std::cout << "Got nothing" << std::endl; 
     }
 }
 
@@ -65,17 +81,48 @@ bool Server::acceptClient() {
     socklen_t client_len = sizeof(client_addr);
     int cl_Fd = accept(this->listen_socket.getFd(), reinterpret_cast<sockaddr*>(&client_addr), &client_len);
     if (cl_Fd < 0) {
-        std::cerr << "[SERV] Can not listen =(" << std::endl;
+        // std::cerr << "[SERV] Client connection failure =(" << std::endl;
         return false;
     }
+    this->client_ip = ntohl(client_addr.sin_addr.s_addr); // network to host long
+    this->client_port = client_addr.sin_port;
     this->client_socket = Socket(cl_Fd);
     return 1;
 }
 
-string Server::receive() {
-    string result = "";
+bool Server::receive(string& message, const string& clientIP, string& pending) {
+    while(true) {
+        size_t separator = pending.find('\0');
+        if (separator != string::npos) {
+            if (separator > BUFFER_SIZE) {
+                std::cerr << "Message from " << clientIP << " is too large" << std::endl;
+                return 0;
+            }
+            message = pending.substr(0, separator);
+            pending.erase(0, separator + 1); // +1 including \0
+            return 1;
+        }
+        if (pending.size() > BUFFER_SIZE) {
+            std::cerr << "Message from " << clientIP << " is too large" << std::endl;
+            return 0;
+        }
 
-    return result;
+        char buffer[BUFFER_SIZE]{};
+        size_t bytes_recieved = recv(this->client_socket.getFd(), &buffer, BUFFER_SIZE, SOC_SAVE_OPT); // opt is defined
+        if (bytes_recieved == 0) {
+            std::cout << "EOF Client disconnected: " << clientIP << std::endl;
+            return 0;
+        } else if (bytes_recieved == -1) {
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                std::cerr << "[SERV] Client timeout: " << clientIP << std::endl;
+                return false;
+            }
+            std::cerr << "[SERV] Byte reading failure from " << clientIP << ": " << strerror(errno) << std::endl;
+            return 0;
+        }
+        pending.append(buffer, bytes_recieved);
+    }
 }
 
 Server::~Server() {
