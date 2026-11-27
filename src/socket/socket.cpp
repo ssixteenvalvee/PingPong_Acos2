@@ -7,6 +7,7 @@ using std::cout, std::endl;
 
 Socket::Socket() {
     this->fd = socket(AF_INET, SOCK_STREAM, 0);
+    std::cout << "[SCK] Socket initialized: " << fd << std::endl;
     //int opt=1;
     //setsockopt(this->fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 }

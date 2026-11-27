@@ -6,9 +6,11 @@
 class Server {
     private:
         Socket listen_socket;
-        Socket client_socket;
+        Socket client_socket{-1};
         int port = PORT;
+        bool is_run = false;
     public:
+        std::string pending;
         std::string client_ip; // for logging
         int client_port;
 
