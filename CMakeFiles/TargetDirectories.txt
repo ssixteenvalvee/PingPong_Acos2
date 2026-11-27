@@ -1,4 +1,0 @@
-/home/nikita/CProj/PingPong_Acos2/CMakeFiles/server.dir
-/home/nikita/CProj/PingPong_Acos2/CMakeFiles/client.dir
-/home/nikita/CProj/PingPong_Acos2/CMakeFiles/edit_cache.dir
-/home/nikita/CProj/PingPong_Acos2/CMakeFiles/rebuild_cache.dir
