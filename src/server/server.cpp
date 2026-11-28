@@ -10,23 +10,25 @@
 #include <chrono>
 #include <csignal>
 #include <atomic>
+#include <poll.h>
+#include <vector>
 
-#define BUFFER_SIZE 256
+#define BUFFER_SIZE 4096
 #define SOC_SAVE_OPT 0
 
-using std::string;
+using std::string, std::vector;
 
 Server::Server() {
     // this->listen_socket; // fd = socket(...) / TCP_Init (STATEMENT HAS NO EFFECT)
     this->port = PORT;
-    this->client_socket = Socket(-1);
+    //this->client_socket = Socket(-1);
 }
-
+/*
 Server::Server(int ownPort) { // perhaps, I'll remove it. maybe setting custom port is redundant.
     this->listen_socket = Socket();
     this->port = ownPort;
 }
-
+*/
 void Server::setPort(int newPort) {
     this->port = newPort;
 }
@@ -62,44 +64,66 @@ bool Server::run() {
         std::cerr << "[SERV] Can not Init listening socket" << std::endl;
         return 0;
     }
-    string message;
     this->is_run = true;
-    while (this->is_run == true) {
-        bool accepted = this->acceptClient();
-        if (accepted != true) {
-            std::cerr << "[SERV] Client connection failure" << std::endl;
-            return 0;
+    while(this->is_run == true) { // LOOP
+        std::vector<pollfd> fds;
+        fds.push_back({this->listen_socket.getFd(), POLLIN, 0}); // pollin - data for reading available
+        // 0 -> flag for revents -> return events -> and listen_socket does not settle any events so it is 0.
+        // linux kernel rewrites revents every time when somebody happens. (!!!). Zero is just a filler I suppose.
+        for (const auto& client : this->clients) {
+            fds.push_back({client.sock.getFd(), POLLIN, 0});
         }
-        while(this->is_run == true && this->client_socket.isOpen()) {
-            bool rec_Status = receive(message, this->client_ip, pending);
-            if (rec_Status == false) {
-                std::cout << "[SERV] Client disconnected." << std::endl;
-                this->client_socket.close();
-                this->pending.clear();
-                break;
-            }
-            if (!message.empty()) {
-                // add history/log saving here
-                //auto nowt = std::chrono::system_clock::now();
-                //std::chrono::system_clock::to_time_t(nowt);
-                std::cout << "[SERV] MSG: " << message << std::endl; 
-            } else {
-                std::cout << "Got nothing" << std::endl; 
-            }
-            if (message == "ping") {
-                this->send("pong"); // '\0' auto-add inside send
-            } else if (message == "/shutdown") {
-                this->send("Ok then. Bye!");
-                this->is_run = false;
-            } else {
-                this->send("what?");
+        // listen_socket is first every time for convinience.
+
+        int activity = ::poll(fds.data(), fds.size(), -1); // -1 == wait for ETERNITY.
+        if (activity < 0) {
+            std::cerr << "[SERV] Poll error: " << strerror(errno) << std::endl;
+            break;
+        }
+        int clients_exist = static_cast<int>(this->clients.size());
+        if (fds[0].revents & POLLIN) { 
+            this->acceptClient();
+        }
+        for (int i = clients_exist - 1; i >=0; i--) {
+            short events_returned = fds[i+1].revents;
+            if (events_returned & (POLLIN | POLLHUP | POLLERR)) { // POLLHUP - Hang up - повесить трубку
+                string message;
+                if (!this->receive(this->clients[i], message)) {
+                    std::cout << "[SERV] Client " << this->clients[i].ip << " disconnected" << std::endl;
+                    this->clients.erase(this->clients.begin() + i);
+                    continue;
+                }
+
+                if (message == "ping") {
+                    this->send(this->clients[i], "pong");
+                    this->history.addToLogs("Server", "pong");
+                } else if (message == "/shutdown") {
+                    this->send(this->clients[i], "Ok then. Bye!");
+                    this->history.addToLogs("Server", "Ok then. Bye!");
+                    this->is_run = false;
+                } else if (message == "/history") {
+                    this->send(this->clients[i], history.readLogs());
+                } else if (message == "sup, machine!") {
+                    this->send(this->clients[i], "ay! wasup! (づ｡◕‿‿◕｡)づ");
+                    this->history.addToLogs("Server", "ay! wasup! (づ｡◕‿‿◕｡)づ");
+                } else {
+                    // this->send(this->clients[i], "what?");
+                    this->broadcast("[" + this->clients[i].ip + "]: " + message, i);
+                    string author = this->clients[i].ip + std::to_string(this->clients[i].port);
+                    this->history.addToLogs(author, message);
+                }
             }
         }
     }
-    this->is_run = false;
-    std::cout << "[SERV] Run stop" << std::endl;
-    this->pending.clear();
     return true;
+}
+
+void Server::broadcast(const std::string& message, int sender) {
+    for (int i = 0; i < static_cast<int>(this->clients.size()); ++i) {
+        if (i != sender) {
+            this->send(this->clients[i], message);
+        }
+    }
 }
 
 bool Server::acceptClient() {
@@ -111,20 +135,26 @@ bool Server::acceptClient() {
         return false;
     }
     char ip_buffer[INET_ADDRSTRLEN]{};
-    inet_ntop(AF_INET, &client_addr.sin_addr, ip_buffer, sizeof(ip_buffer));
-    this->client_ip = ip_buffer;
-    this->client_port = ntohs(client_addr.sin_port);
-    this->client_socket = Socket(cl_Fd);
-    std::cout << "[SERV] Client accepted" << std::endl;
+    ClientSession session;
+    session.sock = Socket(cl_Fd);
+    if (inet_ntop(AF_INET, &client_addr.sin_addr, ip_buffer, sizeof(ip_buffer)) != nullptr) {
+        session.ip = ip_buffer;
+    }
+    session.port = ntohs(client_addr.sin_port); // network to host short
+    this->clients.push_back(std::move(session)); // can not copy
+    std::cout << "[SERV] Client accepted: " << session.ip << ": " << session.port << std::endl;
     return 1;
 }
 
-bool Server::receive(string& message, const string& clientIP, string& pending) {
+bool Server::receive(ClientSession& session, string& message) {
     while(true) {
+        string& pending = session.pending;
+        Socket& client_socket = session.sock;
+        string& clientIP = session.ip;
         ssize_t separator = pending.find('\0');
         if (separator != string::npos) {
             if (separator > BUFFER_SIZE) {
-                std::cerr << "Message from " << clientIP << " is too large" << std::endl;
+                std::cerr << "Message from " << session.ip << " is too large" << std::endl;
                 return 0;
             }
             message = pending.substr(0, separator);
@@ -137,7 +167,7 @@ bool Server::receive(string& message, const string& clientIP, string& pending) {
         }
 
         char buffer[BUFFER_SIZE]{};
-        ssize_t bytes_recieved = recv(this->client_socket.getFd(), &buffer, BUFFER_SIZE, SOC_SAVE_OPT); // opt is defined
+        ssize_t bytes_recieved = recv(client_socket.getFd(), &buffer, BUFFER_SIZE, SOC_SAVE_OPT); // opt is defined
         if (bytes_recieved == 0) {
             std::cout << "EOF Client disconnected: " << clientIP << std::endl;
             return 0;
@@ -154,8 +184,10 @@ bool Server::receive(string& message, const string& clientIP, string& pending) {
     }
 }
 
-bool Server::send(const string message) {
-    if (!this->client_socket.isOpen()) {
+bool Server::send(ClientSession& session, const string message) {
+    Socket& client_socket = session.sock;
+
+    if (!client_socket.isOpen()) {
         std::cerr << "[SERV] Sending error: No client connected" << std::endl;
         return 0;
     }
@@ -163,7 +195,7 @@ bool Server::send(const string message) {
     size_t wholeInfo_Size = wholeInfo.size();
     size_t totalSent = 0;
     while (totalSent < wholeInfo_Size) {
-        ssize_t sent = ::send(this->client_socket.getFd(), wholeInfo.data() + totalSent, wholeInfo_Size - totalSent, 0);
+        ssize_t sent = ::send(client_socket.getFd(), wholeInfo.data() + totalSent, wholeInfo_Size - totalSent, 0);
         if (sent < 0) {
             if (errno == EINTR) continue;
             std::cerr << "[SERV] Sending error: " << strerror(errno) << std::endl;
@@ -176,6 +208,8 @@ bool Server::send(const string message) {
 }
 
 Server::~Server() {
-    client_socket.close();
+    for (auto& client : clients) {
+        client.sock.close();
+    }
     listen_socket.close();
 }

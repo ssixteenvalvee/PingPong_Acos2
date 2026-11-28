@@ -20,3 +20,7 @@ client
 
 .DS_Store
 *.log
+
+*.txt
+*.cmake
+!CMakeLists.txt

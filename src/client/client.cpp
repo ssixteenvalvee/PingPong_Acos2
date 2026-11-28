@@ -8,8 +8,10 @@
 #include <string.h>
 #include <string>
 #include <cerrno>
+#include <poll.h>
+#include <unistd.h>
 
-#define BUFFER_SIZE 256
+#define BUFFER_SIZE 4096
 
 Client::Client() {}
 Client::~Client() {
@@ -103,27 +105,43 @@ bool Client::sendCl(const std::string& data) {
 }
 
 void Client::run() {
-    std::string input;
-    std::string reply;
-    std::cout << "[Client] Type 'ping', '/shutdown' or '/quit':" << std::endl;
-    while (std::getline(std::cin, input)) {
-        if (input == "/quit") {
-            break;
-        }
-        if (input.empty()) {
-            continue;
-        }
-        if (!this->sendCl(input)) {
-            break;
-        }
-        if (!this->receiveCl(reply)) {
-            std::cout << "[Client] Connection closed by server." << std::endl;
-            break;
-        }
+    std::cout << "[CL] Connected. Type 'ping', '/history', '/quit' or anything you like:\n";
+    // 2 дескрипора: 0 = клавиатура, 1 = сокет сервера
+    pollfd fds[2];
+    fds[0] = {STDIN_FILENO, POLLIN, 0}; // STDIN_FILENO == keyboard
+    fds[1] = {this->cl.getFd(), POLLIN, 0};
 
-        std::cout << "[Server]: " << reply << std::endl;
-        if (input == "/shutdown") {
+    while (true) {
+        int activity = ::poll(fds, 2, -1);
+        if (activity < 0) {
+            if (errno == EINTR) continue; // system call interrutpion if SIGINT (special interuption flag) is catched. nothing serious
+            std::cerr << "[CL] Poll error: " << strerror(errno) << std::endl;
             break;
+        }
+        // enter hit -> read & send
+        if (fds[0].revents & POLLIN) {
+            std::string input;
+            if (!std::getline(std::cin, input) || input == "/quit") {
+                break;
+            }
+            if (!input.empty()) {
+                if (!this->sendCl(input)) {
+                    break;
+                }
+            }
+        }
+        if (fds[1].revents & (POLLIN | POLLHUP | POLLERR)) {
+            std::string reply;
+            if (!this->receiveCl(reply)) {
+                std::cout << "\n[CL] Server disconnected." << std::endl;
+                break;
+            }
+            std::cout << reply << std::endl;
+            while (this->pending.find('\0') != std::string::npos) {
+                if (this->receiveCl(reply)) {
+                    std::cout << reply << std::endl;
+                }
+            }
         }
     }
 }
